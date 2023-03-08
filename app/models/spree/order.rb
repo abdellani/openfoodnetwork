@@ -62,6 +62,7 @@ module Spree
     has_many :line_item_adjustments, through: :line_items, source: :adjustments
     has_many :shipment_adjustments, through: :shipments, source: :adjustments
     has_many :all_adjustments, class_name: 'Spree::Adjustment', dependent: :destroy
+    has_many :invoices
 
     belongs_to :order_cycle
     belongs_to :distributor, class_name: 'Enterprise'
@@ -95,7 +96,7 @@ module Spree
     }
     validate :disallow_guest_order
     validates :email, presence: true,
-                      format: /\A([\w.%+\-']+)@([\w\-]+\.)+(\w{2,})\z/i,
+                      format: /\A([\w.%+\-']+)@([\w-]+\.)+(\w{2,})\z/i,
                       if: :require_email
     validates :order_cycle, presence: true, on: :set_distribution_step
     validates :distributor, presence: true, on: :set_distribution_step
@@ -616,6 +617,29 @@ module Spree
       else
         line_items.sort_by { |li| [li.product.name] }
       end
+    end
+
+    def can_generate_new_invoice?
+      return true if invoices.empty?
+
+      !invoice_comparator.equal? current_state_invoice, invoices.last
+    end
+
+    def invoice_comparator
+      @invoice_comparator ||= InvoiceComparator.new
+    end
+
+    def current_state_invoice
+      Invoice.new(
+        order: self, 
+        data: serialize_for_invoice, 
+        date: Time.now.to_date,
+        number: invoices.count + 1
+      )
+    end
+
+    def serialize_for_invoice
+      Invoice::OrderSerializer.new(self).serializable_hash
     end
 
     private

@@ -292,6 +292,17 @@ ActiveRecord::Schema[7.0].define(version: 2023_04_24_141213) do
     t.index ["enterprise_id", "variant_id"], name: "index_inventory_items_on_enterprise_id_and_variant_id", unique: true
   end
 
+  create_table "invoices", force: :cascade do |t|
+    t.bigint "order_id"
+    t.string "status"
+    t.integer "number"
+    t.jsonb "data"
+    t.date "date", default: -> { "CURRENT_TIMESTAMP" }
+    t.datetime "created_at", null: false
+    t.datetime "updated_at", null: false
+    t.index ["order_id"], name: "index_invoices_on_order_id"
+  end
+
   create_table "order_cycle_schedules", id: :serial, force: :cascade do |t|
     t.integer "order_cycle_id", null: false
     t.integer "schedule_id", null: false
@@ -1192,7 +1203,7 @@ ActiveRecord::Schema[7.0].define(version: 2023_04_24_141213) do
 
   create_table "vouchers", force: :cascade do |t|
     t.string "code", limit: 255, null: false
-    t.datetime "expiry_date"
+    t.datetime "expiry_date", precision: nil
     t.datetime "created_at", null: false
     t.datetime "updated_at", null: false
     t.bigint "enterprise_id"
@@ -1242,6 +1253,7 @@ ActiveRecord::Schema[7.0].define(version: 2023_04_24_141213) do
   add_foreign_key "exchanges", "enterprises", column: "receiver_id", name: "exchanges_receiver_id_fk"
   add_foreign_key "exchanges", "enterprises", column: "sender_id", name: "exchanges_sender_id_fk"
   add_foreign_key "exchanges", "order_cycles", name: "exchanges_order_cycle_id_fk"
+  add_foreign_key "invoices", "spree_orders", column: "order_id"
   add_foreign_key "order_cycle_schedules", "order_cycles", name: "oc_schedules_order_cycle_id_fk"
   add_foreign_key "order_cycle_schedules", "schedules", name: "oc_schedules_schedule_id_fk"
   add_foreign_key "order_cycles", "enterprises", column: "coordinator_id", name: "order_cycles_coordinator_id_fk"
