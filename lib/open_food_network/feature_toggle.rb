@@ -44,6 +44,9 @@ module OpenFoodNetwork
       "white_label" => <<~DESC,
         Customize shopfront (shop, cart, checkout) and emails without OFN branding.
       DESC
+      "invoices" => <<~DESC,
+        Enable invoices.
+      DESC
     }.freeze
 
     def self.setup!
