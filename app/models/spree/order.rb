@@ -619,10 +619,6 @@ module Spree
       end
     end
 
-    def next_invoice_number
-      invoices.count + 1
-    end
-
     private
 
     def fee_handler
