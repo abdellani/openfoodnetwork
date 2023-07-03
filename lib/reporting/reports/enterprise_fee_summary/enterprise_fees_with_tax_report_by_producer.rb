@@ -216,22 +216,31 @@ module Reporting
         end
 
         def order_cycle_totals_row
-          proc do |_key, items, _rows|
+          proc do |_key, items, rows|
             supplier_id = items.first.first[2] # supplier id used in the grouped line items
-            order_ids = items.flat_map(&:second).map(&:id).uniq
             line_items = items.flat_map(&:second).uniq.map(&:line_items).flatten
               .filter do |line_item|
                 line_item.supplier_id == supplier_id
               end
 
-            total_excl_tax = total_fees_excl_tax(order_ids) + line_items_excl_tax(line_items)
-            tax = tax_for_order_ids(order_ids) + tax_for_line_items(line_items)
+            tax_for_enterprise_fees = rows.map(&:tax).sum
+            total_excl_tax = total_fees_excl_tax(rows) + line_items_excl_tax(line_items)
+            tax = tax_for_enterprise_fees + tax_for_line_items(line_items)
             {
               total_excl_tax:,
               tax:,
               total_incl_tax: total_excl_tax + tax
             }
           end
+        end
+
+        def total_fees_excl_tax(rows)
+          rows.group_by do |row|
+            [row.enterprise_fee_name, row.enterprise_fee_type, row.enterprise_fee_owner]
+          end
+            .values.map(&:first)
+            .map(&:total_excl_tax)
+            .sum
         end
 
         def order_cycle_line_items_row
@@ -260,10 +269,6 @@ module Reporting
           end
         end
 
-        def total_fees_excl_tax(order_ids)
-          enterprise_fees_amount_for_orders(order_ids) - included_tax_for_order_ids(order_ids)
-        end
-
         def line_items_excl_tax(line_items)
           cost_of_line_items(line_items) - line_items.sum(&:included_tax)
         end
@@ -277,41 +282,6 @@ module Reporting
           line_items.map do |line_item|
             line_item.adjustments.eligible.tax.sum('amount')
           end.sum
-        end
-
-        def included_tax_for_order_ids(order_ids)
-          Spree::Adjustment.tax
-            .where(order: order_ids)
-            .where(included: true)
-            .where(adjustable_type: 'Spree::Adjustment')
-            .where(adjustable_id: enterprise_fee_adjustment_ids_for_orders(order_ids))
-            .pick("sum(amount)") || 0
-        end
-
-        def tax_for_order_ids(order_ids)
-          Spree::Adjustment.tax
-            .where(order: order_ids)
-            .where(adjustable_type: 'Spree::Adjustment')
-            .where(adjustable_id: enterprise_fee_adjustment_ids_for_orders(order_ids))
-            .pick("sum(amount)") || 0
-        end
-
-        def enterprise_fee_adjustment_ids_for_orders(order_ids)
-          enterprise_fees_for_orders(order_ids).pluck(:id)
-        end
-
-        def enterprise_fees_amount_for_orders(order_ids)
-          enterprise_fees_for_orders(order_ids).pick("sum(amount)") || 0
-        end
-
-        def enterprise_fees_for_orders(order_ids)
-          enterprise_fees = Spree::Adjustment.enterprise_fee
-            .where(order_id: order_ids)
-          return enterprise_fees unless enterprise_fee_filters?
-
-          enterprise_fees.where(
-            originator_id: enterprise_fee_filtered_ids
-          )
         end
 
         def distributor(query_result_row)
