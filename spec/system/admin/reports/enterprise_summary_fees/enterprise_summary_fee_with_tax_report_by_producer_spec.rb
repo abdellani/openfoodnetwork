@@ -22,13 +22,14 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
   let!(:state_zone){ create(:zone_with_state_member) }
   let!(:country_zone){ create(:zone_with_member) }
   let!(:tax_category){ create(:tax_category, name: 'tax_category') }
+  let(:included_in_price) { false }
   let!(:state_tax_rate){
     create(:tax_rate, zone: state_zone, tax_category:,
-                      name: 'State', amount: 0.015)
+                      name: 'State', amount: 0.015, included_in_price:)
   }
   let!(:country_tax_rate){
     create(:tax_rate, zone: country_zone, tax_category:,
-                      name: 'Country', amount: 0.025)
+                      name: 'Country', amount: 0.025, included_in_price:)
   }
   let!(:ship_address){ create(:ship_address) }
 
@@ -48,16 +49,54 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
   let!(:variant2){ create(:variant, product_id: product2.id, tax_category:) }
   let!(:distributor_owner) { create(:user, enterprise_limit: 1) }
   let!(:distributor){
-    create(:distributor_enterprise_with_tax, name: 'Distributor', owner_id: distributor_owner.id)
+    distributor = create(:distributor_enterprise_with_tax, name: 'Distributor',
+                                                           owner_id: distributor_owner.id)
+
+    distributor.shipping_methods << shipping_method
+    distributor.payment_methods << payment_method
+
+    distributor
   }
   let!(:payment_method){ create(:payment_method, :flat_rate) }
   let!(:shipping_method){ create(:shipping_method, :flat_rate) }
 
   let!(:order_cycle){
-    create(:simple_order_cycle, distributors: [distributor], name: "oc1")
+    order_cycle = create(:simple_order_cycle, distributors: [distributor], name: "oc1")
+
+    # creates exchanges for oc1
+    order_cycle.exchanges.create! sender: supplier, receiver: distributor, incoming: true
+    order_cycle.exchanges.create! sender: supplier2, receiver: distributor, incoming: true
+
+    # adds variants to exchanges on oc1
+    order_cycle.coordinator_fees << coordinator_fees
+    order_cycle.exchanges.incoming.first.exchange_fees.create!(enterprise_fee: supplier_fees)
+    order_cycle.exchanges.incoming.first.exchange_variants.create!(variant:)
+    order_cycle.exchanges.incoming.second.exchange_fees.create!(enterprise_fee: supplier_fees2)
+    order_cycle.exchanges.incoming.second.exchange_variants.create!(variant: variant2)
+    order_cycle.exchanges.outgoing.first.exchange_fees.create!(enterprise_fee: distributor_fee)
+    order_cycle.exchanges.outgoing.first.exchange_variants.create!(variant:)
+    order_cycle.exchanges.outgoing.first.exchange_variants.create!(variant: variant2)
+
+    order_cycle
   }
   let!(:order_cycle2){
-    create(:simple_order_cycle, distributors: [distributor], name: "oc2")
+    order_cycle2 = create(:simple_order_cycle, distributors: [distributor], name: "oc2")
+
+    # creates exchanges for oc2
+    order_cycle2.exchanges.create! sender: supplier, receiver: distributor, incoming: true
+    order_cycle2.exchanges.create! sender: supplier2, receiver: distributor, incoming: true
+
+    # adds variants to exchanges on oc2
+    order_cycle2.coordinator_fees << coordinator_fees
+    order_cycle2.exchanges.incoming.first.exchange_fees.create!(enterprise_fee: supplier_fees)
+    order_cycle2.exchanges.incoming.first.exchange_variants.create!(variant:)
+    order_cycle2.exchanges.incoming.second.exchange_fees.create!(enterprise_fee: supplier_fees2)
+    order_cycle2.exchanges.incoming.second.exchange_variants.create!(variant: variant2)
+    order_cycle2.exchanges.outgoing.first.exchange_fees.create!(enterprise_fee: distributor_fee)
+    order_cycle2.exchanges.outgoing.first.exchange_variants.create!(variant:)
+    order_cycle2.exchanges.outgoing.first.exchange_variants.create!(variant: variant2)
+
+    order_cycle2
   }
 
   let!(:enterprise_relationship1) {
@@ -96,56 +135,41 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
                                         tax_category:)
   }
 
-  # creates exchanges for oc1
-  let!(:incoming_exchange1) {
-    order_cycle.exchanges.create! sender: supplier, receiver: distributor, incoming: true
-  }
-  let!(:incoming_exchange2) {
-    order_cycle.exchanges.create! sender: supplier2, receiver: distributor, incoming: true
-  }
-  let(:outgoing_exchange1) {
-    order_cycle.exchanges.create! sender: distributor, receiver: distributor, incoming: false
-  }
-
-  # sets exchanges for oc2
-  let!(:incoming_exchange3) {
-    order_cycle2.exchanges.create! sender: supplier, receiver: distributor, incoming: true
-  }
-  let!(:incoming_exchange4) {
-    order_cycle2.exchanges.create! sender: supplier2, receiver: distributor, incoming: true
-  }
-  let(:outgoing_exchange2) {
-    order_cycle2.exchanges.create! sender: distributor, receiver: distributor, incoming: false
-  }
-
   # creates orders for for oc1 and oc2
-  let!(:order) { create(:order_with_distributor, distributor:) }
-  let!(:order2) { create(:order_with_distributor, distributor:) }
+  let!(:order) {
+    order = create(:order_with_distributor, distributor:, order_cycle_id: order_cycle.id,
+                                            ship_address_id: ship_address.id)
+
+    order.line_items.create({ variant:, quantity: 1, price: 100 })
+
+    # This will load the enterprise fees from the order cycle.
+    # This is needed because the order instance was created
+    # independently of the order_cycle.
+    order.recreate_all_fees!
+    while !order.completed?
+      break unless order.next!
+    end
+    order
+  }
+
+  let!(:order2) {
+    order2 = create(:order_with_distributor, distributor:, order_cycle_id: order_cycle2.id,
+                                             ship_address_id: ship_address.id)
+
+    order2.line_items.create({ variant: variant2, quantity: 1, price: 50 })
+
+    # This will load the enterprise fees from the order cycle.
+    # This is needed because the order instance was created
+    # independently of the order_cycle.
+    order2.recreate_all_fees!
+    while !order2.completed?
+      break unless order2.next!
+    end
+
+    order2
+  }
 
   before do
-    # adds variants to exchanges on oc1
-    order_cycle.coordinator_fees << coordinator_fees
-    order_cycle.exchanges.incoming.first.exchange_fees.create!(enterprise_fee: supplier_fees)
-    order_cycle.exchanges.incoming.first.exchange_variants.create!(variant:)
-    order_cycle.exchanges.incoming.second.exchange_fees.create!(enterprise_fee: supplier_fees2)
-    order_cycle.exchanges.incoming.second.exchange_variants.create!(variant: variant2)
-    order_cycle.exchanges.outgoing.first.exchange_fees.create!(enterprise_fee: distributor_fee)
-    order_cycle.exchanges.outgoing.first.exchange_variants.create!(variant:)
-    order_cycle.exchanges.outgoing.first.exchange_variants.create!(variant: variant2)
-
-    # adds variants to exchanges on oc2
-    order_cycle2.coordinator_fees << coordinator_fees
-    order_cycle2.exchanges.incoming.first.exchange_fees.create!(enterprise_fee: supplier_fees)
-    order_cycle2.exchanges.incoming.first.exchange_variants.create!(variant:)
-    order_cycle2.exchanges.incoming.second.exchange_fees.create!(enterprise_fee: supplier_fees2)
-    order_cycle2.exchanges.incoming.second.exchange_variants.create!(variant: variant2)
-    order_cycle2.exchanges.outgoing.first.exchange_fees.create!(enterprise_fee: distributor_fee)
-    order_cycle2.exchanges.outgoing.first.exchange_variants.create!(variant:)
-    order_cycle2.exchanges.outgoing.first.exchange_variants.create!(variant: variant2)
-
-    distributor.shipping_methods << shipping_method
-    distributor.payment_methods << payment_method
-
     product.update!({
                       tax_category_id: tax_category.id,
                       supplier_id: supplier.id
@@ -163,36 +187,6 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
     # 2nd - incoming exchange (25) 1.5% = 0.38, 2.5% = 0.63
     #     - outgoing exchange (10) 1.5% = 0.15, 2.5% = 0.25
     #     - line items        (50) 1.5% = 0.75, 2.5% = 1.25
-
-    before do
-      # adds a line items to the order on oc1
-      order.line_items.create({ variant:, quantity: 1, price: 100 })
-      order.update!({
-                      order_cycle_id: order_cycle.id,
-                      ship_address_id: ship_address.id
-                    })
-      # This will load the enterprise fees from the order cycle.
-      # This is needed because the order instance was created
-      # independently of the order_cycle.
-      order.recreate_all_fees!
-      while !order.completed?
-        break unless order.next!
-      end
-
-      # adds a line items to the order on oc2
-      order2.line_items.create({ variant: variant2, quantity: 1, price: 50 })
-      order2.update!({
-                       order_cycle_id: order_cycle2.id,
-                       ship_address_id: ship_address.id
-                     })
-      # This will load the enterprise fees from the order cycle.
-      # This is needed because the order instance was created
-      # independently of the order_cycle.
-      order2.recreate_all_fees!
-      while !order2.completed?
-        break unless order2.next!
-      end
-    end
 
     describe "orders" do
       # for supplier 1, oc1
@@ -611,38 +605,7 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
     #     - line items       (100) 1.5% = 1.50, 2.5% = 2.50
     #     - line items        (50) 1.5% = 1.50, 2.5% = 2.50
 
-    before do
-      state_tax_rate.update!({ included_in_price: true })
-      country_tax_rate.update!({ included_in_price: true })
-
-      # adds a line items to the order on oc1
-      order.line_items.create({ variant:, quantity: 1, price: 100 })
-      order.update!({
-                      order_cycle_id: order_cycle.id,
-                      ship_address_id: ship_address.id
-                    })
-      # This will load the enterprise fees from the order cycle.
-      # This is needed because the order instance was created
-      # independently of the order_cycle.
-      order.recreate_all_fees!
-      while !order.completed?
-        break unless order.next!
-      end
-
-      # adds a line items to the order on oc2
-      order2.line_items.create({ variant: variant2, quantity: 1, price: 50 })
-      order2.update!({
-                       order_cycle_id: order_cycle2.id,
-                       ship_address_id: ship_address.id
-                     })
-      # This will load the enterprise fees from the order cycle.
-      # This is needed because the order instance was created
-      # independently of the order_cycle.
-      order2.recreate_all_fees!
-      while !order2.completed?
-        break unless order2.next!
-      end
-    end
+    let(:included_in_price) { true }
 
     let(:coordinator_state_tax1){
       ["Distributor", "Supplier1", "Yes", "oc1", "Adminstration", "admin", "Distributor",
@@ -781,33 +744,27 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
 
     let!(:state_tax_rate2){
       create(:tax_rate, zone: state_zone2, tax_category:,
-                        name: 'Another State Tax', amount: 0.02)
+                        name: 'Another State Tax', amount: 0.02, included_in_price:)
+    }
+
+    let!(:order2) {
+      # Ensure tax rates set up first
+      state_tax_rate2
+
+      order2 = create(:order_with_distributor, distributor:, order_cycle_id: order_cycle.id,
+                                               ship_address_id: another_address.id)
+
+      # adds a line items to the order on oc2
+      order2.line_items.create({ variant:, quantity: 1, price: 50 })
+      order2.recreate_all_fees!
+      while !order2.completed?
+        break unless order2.next!
+      end
+
+      order2
     }
 
     context "added tax" do
-      before do
-        # adds a line items to the order on oc1
-        order.line_items.create({ variant:, quantity: 1, price: 100 })
-        order.update!({
-                        order_cycle_id: order_cycle.id,
-                        ship_address_id: ship_address.id
-                      })
-        order.recreate_all_fees!
-        while !order.completed?
-          break unless order.next!
-        end
-
-        # adds a line items to the order on oc2
-        order2.line_items.create({ variant:, quantity: 1, price: 50 })
-        order2.update!({
-                         order_cycle_id: order_cycle.id,
-                         ship_address_id: another_address.id
-                       })
-        order2.recreate_all_fees!
-        while !order2.completed?
-          break unless order2.next!
-        end
-      end
       let(:admin_state_tax1){
         [
           "Distributor", "Supplier1", "Yes", "oc1", "Adminstration", "admin",
@@ -905,33 +862,7 @@ describe "Enterprise Summary Fee with Tax Report By Producer" do
     end
 
     context "included tax" do
-      before do
-        state_tax_rate.update!({ included_in_price: true })
-        country_tax_rate.update!({ included_in_price: true })
-        state_tax_rate2.update!({ included_in_price: true })
-
-        order.line_items.create({ variant:, quantity: 1, price: 100 })
-        order.update!({
-                        order_cycle_id: order_cycle.id,
-                        ship_address_id: ship_address.id
-                      })
-        order.recreate_all_fees!
-        while !order.completed?
-          break unless order.next!
-        end
-
-        # adds a line items to the order on oc2
-        order2.line_items.create({ variant:, quantity: 1, price: 50 })
-        order2.update!({
-                         order_cycle_id: order_cycle.id,
-                         ship_address_id: another_address.id
-                       })
-
-        order2.recreate_all_fees!
-        while !order2.completed?
-          break unless order2.next!
-        end
-      end
+      let(:included_in_price) { true }
 
       let(:admin_state_tax1){
         [
