@@ -253,5 +253,6 @@ module Openfoodnetwork
     config.exceptions_app = self.routes
 
     config.view_component.generate.sidecar = true # Always generate components in subfolders
+    config.flipper.test_help = false
   end
 end
